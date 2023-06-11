@@ -99,8 +99,11 @@ extern void destroy_cond_arr(ConditionArray*);
 extern void add_elem_to_cond(ConditionArray*, LextokArray*);
 extern void remove_element_from_cond(ConditionArray*, int);
 extern void end_if_cond(Lextok *);
-LextokArray* probabilityArray = NULL;
-ConditionArray* conditionsArray = NULL;
+extern void add_prob_branch(Lextok *);
+extern int find_prob_branch_index(int);
+LextokArray* probabilityIfBranch = NULL;
+LextokArray* IfBranchesList = NULL;
+ConditionArray* IfOperatorList = NULL;
 
 char	**trailfilename;	/* new option 'k' */
 
@@ -1627,27 +1630,36 @@ void remove_elem(LextokArray *array, int index) {
     }
 }
 
+// Функция для добавления ветки с вероятностью оператора if в специальный список
+// Так как анализ является восходящим, то ветки оператора if выполнятся раньше
+// Данные могу передавать вверх по цепочки или сохраняться.
+// В данном случае, они записываются в специальный массив и затем
+// в конце оператора if очищаются
 void add_sequence_prob(Lextok *lextok, int isExpr) {
-    if (probabilityArray == NULL) {
-        probabilityArray = create_lex_arr();
+    if (probabilityIfBranch == NULL) {
+        probabilityIfBranch = create_lex_arr();
     }
     ProbabilityLex temp;
     temp.isExpr = isExpr;
     temp.lex = lextok;
+    // Если пользователь указал отрицательную вероятность, то показываем ошибку
+    if (lextok->val < 0) {
+        printf("Negative probability branch. Line: %d", lextok->ln);
+        exit(1);
+    }
     temp.probVal = isExpr == 1 ? -1 : lextok->val;
-    add_elem_to_lex_arr(probabilityArray, temp);
+    add_elem_to_lex_arr(probabilityIfBranch, temp);
 }
 
 void destroy_lex() {
-    printf("destroy_lex\n");
-    if (probabilityArray != NULL) {
-        destroy_lex_arr(probabilityArray);
+    if (probabilityIfBranch != NULL) {
+        destroy_lex_arr(probabilityIfBranch);
     }
 }
 
 void init_lex() {
-    if (probabilityArray == NULL) {
-        probabilityArray = create_lex_arr();
+    if (probabilityIfBranch == NULL) {
+        probabilityIfBranch = create_lex_arr();
     }
 };
 
@@ -1690,6 +1702,7 @@ void destroy_cond_arr(ConditionArray* array) {
 
     free(array);
 }
+
 void add_elem_to_cond(ConditionArray* conditionArr, LextokArray* lextokArray) {
     if (conditionArr->size == conditionArr->capacity) {
         conditionArr->capacity *= 2;
@@ -1725,36 +1738,65 @@ void remove_element_from_cond(ConditionArray* conditionArr, int index) {
     conditionArr->size--;
 }
 
+// Самантическая подпрограмма для обработки конца оператора if.
+// Формируем все ветки текущего оператора и добавляем в список
+// операторов if для дальнейшней обработки во время компиляции
 void end_if_cond(Lextok* lextok) {
     if (lextok->ntyp != IF) return;
 
-    if (conditionsArray == NULL) {
-        conditionsArray = create_cond_arr();
+    if (IfOperatorList == NULL) {
+        IfOperatorList = create_cond_arr();
     }
 
-    if (probabilityArray != NULL) {
-        probabilityArray->line = lextok->ln;
-        add_elem_to_cond(conditionsArray, probabilityArray);
-        probabilityArray = NULL;
+    if (IfBranchesList != NULL) {
+        IfBranchesList->line = lextok->ln;
+        add_elem_to_cond(IfOperatorList, IfBranchesList);
+        IfBranchesList = NULL;
     }
 }
 
-void print_element(Lextok *lextok, int show_header) {
-    if (show_header != 0) {
-        printf("-------------Lextok Print Start ---------\n");
-    }
-    printf("uiid = %d, nodeType = %d, line = %d, val = %d, probVal = %d\n", lextok->uiid, lextok->ntyp, lextok->ln, lextok->val, lextok->probVal);
-    if (lextok->lft != NULL) {
-        printf("left children: \n");
-        print_element(lextok->lft, 0);
-    }
-
-    if (lextok->rgt != NULL) {
-        printf("right children: \n");
-        print_element(lextok->rgt, 0);
+int find_prob_branch_index(int line) {
+    int index = -1;
+    if (probabilityIfBranch != NULL) {
+        for (int i = 0; i < probabilityIfBranch->size; i++) {
+            ProbabilityLex temp = probabilityIfBranch->elements[i];
+            if (temp.lex->ln == line) {
+                index = i;
+                break;
+            }
+        }
     }
 
-    if (show_header != 0) {
-        printf("-------------Lextok Print End---------\n");
+    return index;
+};
+
+// Метод для формирования общего списка веток оператора if.
+// Ветка может быть "вероятностной" (с указанием вероятности) или "обычной" (без вероятности).
+// Перед добавлением, мы пробуем определить, является ли ветка "вероятностной".
+// Если является, то достаем из списка информацию о ней и добавлем.
+// Если она не является "вероятностной", то просто без специальных обработок
+// добавляем в общий список веток текущего if.
+void add_prob_branch(Lextok *option) {
+    if (IfBranchesList == NULL) {
+        IfBranchesList = create_lex_arr();
     }
+
+    int prob_branch_index = find_prob_branch_index(option->ln);
+
+    ProbabilityLex temp;
+    if (prob_branch_index == -1) {
+        temp.isProb = 0;
+        temp.isExpr = 0;
+        temp.lex = option;
+        temp.probVal = -1;
+    } else {
+        ProbabilityLex find_branch = probabilityIfBranch->elements[prob_branch_index];
+        temp.isProb = 1;
+        temp.isExpr = find_branch.isExpr;
+        temp.lex = find_branch.lex;
+        temp.probVal = find_branch.isExpr == 1 ? -1 : find_branch.lex->val;
+
+    }
+
+    add_elem_to_lex_arr(IfBranchesList, temp);
 }

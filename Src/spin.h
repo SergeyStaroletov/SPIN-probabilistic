@@ -216,6 +216,7 @@ typedef struct QH {
 
 typedef struct ProbabilityLex {
 	Lextok* lex;
+	int isProb;
 	int probVal;
 	int isExpr;
 } ProbabilityLex;
@@ -224,7 +225,6 @@ typedef struct LextokArray {
 	ProbabilityLex *elements;
 	int size;
 	int capacity;
-
 	int line;
 } LextokArray;
 
@@ -235,6 +235,7 @@ typedef struct ConditionArray {
 } ConditionArray;
 
 typedef struct IfBranch {
+
 	int probVal;
 	int ln;
 } IfBranch;
@@ -470,7 +471,6 @@ void	unskip(int);
 void	whoruns(int);
 void	wrapup(int);
 void	yyerror(char *, ...);
-void	print_element(Lextok *, int);
 void    add_sequence_prob(Lextok *, int);
 LextokArray* create_lex_arr();
 void destroy_lex_arr(LextokArray *);
@@ -484,7 +484,8 @@ void destroy_cond_arr(ConditionArray*);
 void add_elem_to_cond(ConditionArray*, LextokArray*);
 void remove_element_from_cond(ConditionArray*, int);
 void end_if_cond(Lextok *);
-
+void add_prob_branch(Lextok *);
+int find_prob_branch_index(int);
 extern	int unlink(const char *);
 
 #define TMP_FILE1 "._s_p_i_n_"

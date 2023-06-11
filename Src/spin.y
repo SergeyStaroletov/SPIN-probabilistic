@@ -656,6 +656,7 @@ margs            { Expand_Ok--; has_io++;
 	| IF options FI 	{
                   $$ = nn($1, IF, ZN, ZN);
                   end_if_cond($$);
+                  printf("end if cond\n");
 
                   $$->sl = $2->sl;
 				  $$->ln = $1->ln;
@@ -799,9 +800,11 @@ Stmnt	: varref ASGN full_expr	{ $$ = nn($1, ASGN, $1, $3);	/* assignment */
 	;
 
 options : option {
+        add_prob_branch($$);
 		$$->sl = seqlist($1->sq, 0);
 	}
 	| option options	{
+	    add_prob_branch($$);
 		$$->sl = seqlist($1->sq, $2->sl);
 	}
 	;

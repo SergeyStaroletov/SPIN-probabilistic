@@ -19,8 +19,8 @@ extern int	analyze, nproc, nstop, no_print, like_java, old_priority_rules;
 extern short	Have_claim;
 static long	Seed = 1;
 static int	E_Check = 0, Escape_Check = 0;
-extern LextokArray* probabilityArray;
-extern ConditionArray* conditionsArray;
+extern LextokArray* probabilityIfBranch;
+extern ConditionArray* IfOperatorList;
 
 static int	eval_sync(Element *);
 static int	pc_enabled(Lextok *n);
@@ -28,7 +28,6 @@ static int	get_priority(Lextok *n);
 static void	set_priority(Lextok *n, Lextok *m);
 extern void	sr_buf(int, int, const char *);
 int probability_process_pick(int, Element* );
-int verify_branches(Element*);
 int get_branch_index_by_ln(LextokArray* lex_arr, int ln);
 void
 Srand(unsigned int s)
@@ -174,8 +173,9 @@ eval_sub(Element *e)
 		{	if (e->n && e->n->indstep >= 0)
 				k = 0;	/* select 1st executable guard */
 			else {
-                //k = Rand()%j;	/* nondeterminism */
-                k = probability_process_pick(j, e);
+//                int old_k = Rand()%j;	/* nondeterminism */
+//                    k = Rand()%j;
+                    k = probability_process_pick(j, e);
             }
 		}
 
@@ -757,13 +757,6 @@ set_priority(Lextok *n, Lextok *p)
 	}	}
 }
 
-int verify_branches(Element* element) {
-    int result = 0;
-
-
-    return result;
-}
-
 int get_branch_index_by_ln(LextokArray* lex_arr, int ln) {
     int result = -1;
     if (lex_arr->size != 0) {
@@ -781,7 +774,7 @@ int get_branch_index_by_ln(LextokArray* lex_arr, int ln) {
 }
 
 
-int selectIndex(IfBranch *branches, int size)
+int select_index(IfBranch *branches, int size)
 {
     double randValue = (double)Rand() / RAND_MAX; // Случайное число от 0 до 1
     double cumulativeProbability = 0.0;
@@ -797,22 +790,24 @@ int selectIndex(IfBranch *branches, int size)
     return size - 1;
 }
 
-
+// Метод для выбора ветки для выполнения с заданной вероятностью.
+// Если в операторе if отсутствует ветка с заданной вероятностью,
+// то выбор осуществляется случайным образом.
 int probability_process_pick(int number_process, Element* elements) {
     int picked_process_index = Rand() % number_process;
-    if (conditionsArray->size == 0) {
-        // no have prob branch
-        // then pick random process
+    if (IfOperatorList->size == 0 || elements->n->ntyp == DO) {
+        // если ни одной ветки не указана вероятность,
+        // то определяем какую выбрать случайно (как раньше)
         return picked_process_index;
     }
 
-    // are we in if operator
     if (elements->n != NULL && elements->n->ntyp == IF) {
 
-        // get current if operator with him branches
+        // Для того, чтобы обработать вероятности, необходимо достать
+        // нужный оператор if из списка, который был сформирован на этапе анализа.
         int actual_if_index = -1;
-        for (int i = 0; i < conditionsArray->size; i++) {
-            LextokArray* cond = conditionsArray->data[i];
+        for (int i = 0; i < IfOperatorList->size; i++) {
+            LextokArray* cond = IfOperatorList->data[i];
 
             if (cond->line == elements->n->ln) {
                 actual_if_index = i;
@@ -820,15 +815,25 @@ int probability_process_pick(int number_process, Element* elements) {
             }
         }
 
+        // Как только нашли нужный оператор, необходимо проанализировать ветки
         if (actual_if_index != -1) {
-            LextokArray* cur_if = conditionsArray->data[actual_if_index];
+            LextokArray* cur_if = IfOperatorList->data[actual_if_index];
 
-            // then pick conditions lines
+            // список для веток с вероятностями
             struct IfBranch *branches = malloc(number_process * sizeof(struct IfBranch));
             int i = 0;
 
+            // считаем кол-во веток без указания вероятности
+            int notProbBranch = 0;
+
+            // Обращаемся к AST для получения текущего рассматриваемого оператора if.
+            // Достаем из дерева список веток
             SeqList* linkedList = elements->n->sl;
             int probabilities_sum = 0;
+            // Вероятности для веток могут задаваться динамически, т.е. через переменную.
+            // Для того, чтобы посчитать такие переменные на этапе выполнения, необходимо пройтись по веткам
+            // определить, заданы ли вероятности динамически, если да, то необходимо посчитать их текущее
+            // значение с помощью функции eval().
             while (linkedList != NULL) {
                 IfBranch temp;
                 temp.ln = linkedList->this->extent->n->ln;
@@ -836,13 +841,23 @@ int probability_process_pick(int number_process, Element* elements) {
                 int actual_if_index = get_branch_index_by_ln(cur_if, temp.ln);
                 if (actual_if_index != -1) {
                     ProbabilityLex probLex = cur_if->elements[actual_if_index];
-                    temp.probVal = probLex.isExpr == 1 ? eval(probLex.lex) : probLex.probVal;
-                    probabilities_sum += temp.probVal;
+                    if (probLex.isProb == 0) {
+                        notProbBranch++;
+                    } else {
+                        temp.probVal = probLex.isExpr == 1 ? eval(probLex.lex) : probLex.probVal;
+                        if (temp.probVal < 0) {
+                            printf("Negative probability branch. Line: %d", probLex.lex->ln);
+                            exit(1);
+                        }
+                        probabilities_sum += temp.probVal;
+
+                    }
                 }
                 branches[i++] = temp;
                 linkedList = linkedList->nxt;
             }
 
+            // Если сумма вероятностей веток стала больше 100, необходимо остановить программу.
             if (probabilities_sum > 100) {
                 printf("Error probability setting in if operator. ");
                 exit(1);
@@ -850,11 +865,29 @@ int probability_process_pick(int number_process, Element* elements) {
             int percents = 100;
             percents -= probabilities_sum;
 
-            int divider = number_process - cur_if->size;
+            if (notProbBranch > number_process) {
+                printf("Error probability setting in if operator. ");
+                exit(1);
+            }
+
+            // Если нет веток без указания вероятности и при этом, сумма вероятностей заданных веток
+            // не равна 100, то происходит выдача ошибки, так как в  таком случае
+            // одна из веток будет выполняться чаще, чем указано в вероятности. В таком случае, необходимо,
+            // чтобы была хотя бы одна ветка без указания вероятности.
+            if (notProbBranch == 0 && probabilities_sum != 100) {
+                printf("Error probability setting in if operator. Sum of probability branches not 100%");
+                exit(1);
+            }
+
+            // Определяем делитель - кол-во веток, без указания вероятности
+            int divider = number_process - (cur_if->size - notProbBranch);
 
             // improve
-            int probability_of_another_branches = percents / divider;
+            int probability_of_another_branches = divider == 0 ? percents : percents / divider;
 
+            // Как только определили кол-во веток без указания вероятности, необходимо пройтись по ним
+            // и задать вероятности для каждой ветки, которая определяется по формуле:
+            // (100 - "сумма заданных вероятностей") / кол-во веток без вероятности
             for (int i = 0; i < number_process; i++) {
                 IfBranch temp = branches[i];
 
@@ -864,7 +897,8 @@ int probability_process_pick(int number_process, Element* elements) {
                 branches[i] = temp;
             }
 
-            picked_process_index = selectIndex(branches, number_process);
+            // Когда вероятности сформированы, происходит выбор ветки по кумулятивной функции распределения
+            picked_process_index = select_index(branches, number_process);
 
         }
     }

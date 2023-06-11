@@ -8,45 +8,27 @@ init {
 }
 
 proctype receiver() {
-  int type = -1;
-  int t = -1;
-  int count = 10;
-  int pp56 = 0;
+  int count = 10000;
   int pp10 = 0;
+  int pp20 = 0;
+  int pp70 = 0;
+  int pp23 = 0;
 
-  do
-  ::(count > 0) -> {
   pp = 20;
-  if
-    :: true -> {
-        type = 0;
-        pp = 56;
-        pp56++;
-        if
-            :: true -> t = 11
-            :: [prob = 35%] true -> t = 22
-            :: [prob = pp] true -> t = 33
-        fi;
-        printf("now t is = %d", t);
-    }
-    :: [prob = 10%] true -> {type = 1; pp10++;}
-    :: [prob = pp] true -> type = 2
-    :: true -> type = 3
-  fi;
+  do
+      ::(count > 0) -> {
+      if
+          :: [prob = 10%] true -> pp10++;
 
+          :: [prob = pp] true -> pp20++;
 
-   if
-      :: true -> type = 11
-      :: [prob = 35%] true -> type = 22
-      :: [prob = pp] true -> type = 33
-  fi;
-
-  printf("now pp is = %d\n", pp);
-  printf("now state is = %d\n", type);
-  count = count - 1;
-  }
-  ::else -> break;
+      fi;
+          count--;
+      }
+      ::else -> {
+        break;
+      };
   od;
-  printf("Total : pp10 = %d  pp56 = %d\n", pp10, pp56);
+  printf("Total1 : pp10 = %d pp20 = %d pp70 = %d and pp23 = %d \n", pp10/100, pp20/100, pp70/100, pp23/100);
 
 }
