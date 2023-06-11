@@ -85,6 +85,25 @@ static FILE	*fd_ltl = (FILE *) 0;
 static char	*PreArg[64];
 static int	PreCnt = 0;
 static char	out1[64];
+extern void add_sequence_prob(Lextok *, int);
+extern LextokArray* create_lex_arr();
+extern void destroy_lex_arr(LextokArray *);
+extern void remove_elem(LextokArray *, int);
+extern void resize_lex_arr(LextokArray *, int);
+extern void add_elem_to_lex_arr(LextokArray *, ProbabilityLex);
+extern void init_lex();
+extern void destroy_lex();
+
+extern ConditionArray * create_cond_arr();
+extern void destroy_cond_arr(ConditionArray*);
+extern void add_elem_to_cond(ConditionArray*, LextokArray*);
+extern void remove_element_from_cond(ConditionArray*, int);
+extern void end_if_cond(Lextok *);
+extern void add_prob_branch(Lextok *);
+extern int find_prob_branch_index(int);
+LextokArray* probabilityIfBranch = NULL;
+LextokArray* IfBranchesList = NULL;
+ConditionArray* IfOperatorList = NULL;
 
 char	**trailfilename;	/* new option 'k' */
 
@@ -1552,4 +1571,232 @@ explain(int n)
 	}
 }
 
+LextokArray* create_lex_arr() {
+    LextokArray *array = malloc(sizeof(LextokArray));
+    if (array == NULL) {
+        fprintf(stderr, "Failed to allocate memory for array\n");
+        exit(1);
+    }
 
+    array->elements = NULL;
+    array->size = 0;
+    array->capacity = 0;
+
+    return array;
+}
+
+void destroy_lex_arr(LextokArray *array) {
+    free(array->elements);
+    free(array);
+}
+
+void resize_lex_arr(LextokArray *array, int newCapacity) {
+    Lextok *newElements = realloc(array->elements, newCapacity * sizeof(ProbabilityLex));
+    if (newElements == NULL) {
+        fprintf(stderr, "Failed to reallocate memory for array\n");
+        exit(1);
+    }
+
+    array->elements = newElements;
+    array->capacity = newCapacity;
+}
+
+void add_elem_to_lex_arr(LextokArray *array, ProbabilityLex element) {
+    if (array->size == array->capacity) {
+        int newCapacity = (array->capacity == 0) ? 1 : array->capacity * 2;
+        resize_lex_arr(array, newCapacity);
+    }
+
+    array->elements[array->size] = element;
+    array->size++;
+}
+
+void remove_elem(LextokArray *array, int index) {
+    if (index < 0 || index >= array->size) {
+        fprintf(stderr, "Invalid index for element removal\n");
+        exit(1);
+    }
+
+    for (int i = index + 1; i < array->size; i++) {
+        array->elements[i - 1] = array->elements[i];
+    }
+
+    array->size--;
+
+    // Resize the array if necessary to save memory
+    int newCapacity = (array->size > 0 && array->size == array->capacity / 4) ? array->capacity / 2 : array->capacity;
+    if (newCapacity != array->capacity) {
+        resize_lex_arr(array, newCapacity);
+    }
+}
+
+// Функция для добавления ветки с вероятностью оператора if в специальный список
+// Так как анализ является восходящим, то ветки оператора if выполнятся раньше
+// Данные могу передавать вверх по цепочки или сохраняться.
+// В данном случае, они записываются в специальный массив и затем
+// в конце оператора if очищаются
+void add_sequence_prob(Lextok *lextok, int isExpr) {
+    if (probabilityIfBranch == NULL) {
+        probabilityIfBranch = create_lex_arr();
+    }
+    ProbabilityLex temp;
+    temp.isExpr = isExpr;
+    temp.lex = lextok;
+    // Если пользователь указал отрицательную вероятность, то показываем ошибку
+    if (lextok->val < 0) {
+        printf("Negative probability branch. Line: %d", lextok->ln);
+        exit(1);
+    }
+    temp.probVal = isExpr == 1 ? -1 : lextok->val;
+    add_elem_to_lex_arr(probabilityIfBranch, temp);
+}
+
+void destroy_lex() {
+    if (probabilityIfBranch != NULL) {
+        destroy_lex_arr(probabilityIfBranch);
+    }
+}
+
+void init_lex() {
+    if (probabilityIfBranch == NULL) {
+        probabilityIfBranch = create_lex_arr();
+    }
+};
+
+ConditionArray * create_cond_arr() {
+    int default_size = 4;
+    ConditionArray* array = malloc(sizeof(ConditionArray));
+    if (array == NULL) {
+        fprintf(stderr, "Failed to allocate memory for ConditionArray\n");
+        exit(1);
+    }
+
+    array->data = malloc(default_size * sizeof(LextokArray *));
+    if (array->data == NULL) {
+        fprintf(stderr, "Failed to allocate memory for ConditionArray data\n");
+        exit(1);
+    }
+
+    array->size = 0;
+    array->capacity = default_size;
+
+    return array;
+}
+
+void destroy_cond_arr(ConditionArray* array) {
+    if (array == NULL) {
+        return;
+    }
+
+    if (array->data != NULL) {
+        for (int i = 0; i < array->size; i++) {
+            if (array->data[i] != NULL) {
+                if (array->data[i]->elements != NULL) {
+                    free(array->data[i]->elements);
+                }
+                free(array->data[i]);
+            }
+        }
+        free(array->data);
+    }
+
+    free(array);
+}
+
+void add_elem_to_cond(ConditionArray* conditionArr, LextokArray* lextokArray) {
+    if (conditionArr->size == conditionArr->capacity) {
+        conditionArr->capacity *= 2;
+        LextokArray** newData = realloc(conditionArr->data, conditionArr->capacity * sizeof(LextokArray *));
+        if (newData == NULL) {
+            fprintf(stderr, "Failed to reallocate memory for ConditionArray data\n");
+            exit(1);
+        }
+        conditionArr->data = newData;
+    }
+
+    conditionArr->data[conditionArr->size++] = lextokArray;
+}
+
+void remove_element_from_cond(ConditionArray* conditionArr, int index) {
+    if (index < 0 || index >= conditionArr->size) {
+        fprintf(stderr, "Invalid index\n");
+        exit(1);
+    }
+
+    LextokArray* lextokArray = conditionArr->data[index];
+    if (lextokArray != NULL) {
+        if (lextokArray->elements != NULL) {
+            free(lextokArray->elements);
+        }
+        free(lextokArray);
+    }
+
+    for (int i = index; i < conditionArr->size - 1; i++) {
+        conditionArr->data[i] = conditionArr->data[i + 1];
+    }
+
+    conditionArr->size--;
+}
+
+// Самантическая подпрограмма для обработки конца оператора if.
+// Формируем все ветки текущего оператора и добавляем в список
+// операторов if для дальнейшней обработки во время компиляции
+void end_if_cond(Lextok* lextok) {
+    if (lextok->ntyp != IF) return;
+
+    if (IfOperatorList == NULL) {
+        IfOperatorList = create_cond_arr();
+    }
+
+    if (IfBranchesList != NULL) {
+        IfBranchesList->line = lextok->ln;
+        add_elem_to_cond(IfOperatorList, IfBranchesList);
+        IfBranchesList = NULL;
+    }
+}
+
+int find_prob_branch_index(int line) {
+    int index = -1;
+    if (probabilityIfBranch != NULL) {
+        for (int i = 0; i < probabilityIfBranch->size; i++) {
+            ProbabilityLex temp = probabilityIfBranch->elements[i];
+            if (temp.lex->ln == line) {
+                index = i;
+                break;
+            }
+        }
+    }
+
+    return index;
+};
+
+// Метод для формирования общего списка веток оператора if.
+// Ветка может быть "вероятностной" (с указанием вероятности) или "обычной" (без вероятности).
+// Перед добавлением, мы пробуем определить, является ли ветка "вероятностной".
+// Если является, то достаем из списка информацию о ней и добавлем.
+// Если она не является "вероятностной", то просто без специальных обработок
+// добавляем в общий список веток текущего if.
+void add_prob_branch(Lextok *option) {
+    if (IfBranchesList == NULL) {
+        IfBranchesList = create_lex_arr();
+    }
+
+    int prob_branch_index = find_prob_branch_index(option->ln);
+
+    ProbabilityLex temp;
+    if (prob_branch_index == -1) {
+        temp.isProb = 0;
+        temp.isExpr = 0;
+        temp.lex = option;
+        temp.probVal = -1;
+    } else {
+        ProbabilityLex find_branch = probabilityIfBranch->elements[prob_branch_index];
+        temp.isProb = 1;
+        temp.isExpr = find_branch.isExpr;
+        temp.lex = find_branch.lex;
+        temp.probVal = find_branch.isExpr == 1 ? -1 : find_branch.lex->val;
+
+    }
+
+    add_elem_to_lex_arr(IfBranchesList, temp);
+}
