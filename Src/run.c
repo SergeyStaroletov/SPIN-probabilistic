@@ -870,6 +870,10 @@ int probability_process_pick(int number_process, Element* elements) {
                 exit(1);
             }
 
+            if (notProbBranch == 0 && probabilities_sum == 0) {
+                return picked_process_index;
+            }
+
             // Если нет веток без указания вероятности и при этом, сумма вероятностей заданных веток
             // не равна 100, то происходит выдача ошибки, так как в  таком случае
             // одна из веток будет выполняться чаще, чем указано в вероятности. В таком случае, необходимо,
